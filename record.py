@@ -102,6 +102,18 @@ def main() -> None:
     tip = store.checkpoint(name, steps)
     print(f"record: checkpoint '{name}' -> {tip[:12]} ({len(steps)} steps)")
 
+    # 归档自动同步 iCloud：会话结束把查看页刷到 iCloud Drive，手机/别的设备随时能看
+    try:
+        from view import render
+        icloud_dir = os.path.expanduser(
+            "~/Library/Mobile Documents/com~apple~CloudDocs/agent-milestone"
+        )
+        os.makedirs(icloud_dir, exist_ok=True)
+        out = render(db_path=DB_PATH, out_path=os.path.join(icloud_dir, "trails.html"))
+        print(f"record: 已同步 iCloud 查看页 -> {out}")
+    except Exception as ex:
+        print(f"record: iCloud 同步跳过 ({ex})", file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()
