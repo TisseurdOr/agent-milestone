@@ -30,6 +30,7 @@
 | `store.py` | 存储层：SQLite + git 式模型，含 self-check |
 | `server.py` | MCP server，暴露 3 个工具给 agent 主动调 |
 | `record.py` | SessionEnd hook，会话结束自动把 transcript 存档 |
+| `view.py` | 只读查看器：把库里所有轨迹渲染成自包含 HTML（零依赖、浏览器直开） |
 | `test_e2e.py` | 端到端测试：按 agent 的方式驱动三个工具 |
 
 ## 安装
@@ -91,6 +92,7 @@ pip install -r requirements.txt   # 就一个依赖：mcp
 ```bash
 python store.py      # 自检，应打印 self-check ok
 python test_e2e.py   # 端到端：checkpoint → checkout → export
+python view.py       # 生成 trails.html 轨迹查看页（浏览器直开，看所有里程碑+step）
 ```
 
 ## 操作手册
