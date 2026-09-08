@@ -1,0 +1,9 @@
+# 本地数据库含真实对话轨迹，绝不入库
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+.venv/
+__pycache__/
+*.pyc
