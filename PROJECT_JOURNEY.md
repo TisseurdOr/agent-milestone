@@ -36,5 +36,5 @@
 
 - [x] 设计定稿（2026-09-03）
 - [x] 阶段 1 核心闭环（checkpoint/checkout/export + SessionEnd 自动记录，2026-09-08 已跑通）
-- [ ] 阶段 2 外壳（branch/diff/replay）
-- [ ] 阶段 3 演示 + 推 GitHub
+- [x] 阶段 2 外壳（branch/diff/replay/reflog/gc/prune，2026-10-04 已跑通）
+- [ ] 阶段 3 演示 + 发布到 PyPI / pipx

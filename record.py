@@ -102,6 +102,9 @@ def main() -> None:
     tip = store.checkpoint(name, steps)
     print(f"record: checkpoint '{name}' -> {tip[:12]} ({len(steps)} steps)")
 
+    if os.getenv("AGENT_MILESTONE_AUTO_ICLOUD", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return
+
     # 归档自动同步 iCloud：会话结束把查看页刷到 iCloud Drive，手机/别的设备随时能看
     try:
         from view import render

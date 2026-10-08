@@ -1,7 +1,6 @@
 """Read-only viewer: render the trail store as a self-contained HTML page."""
 import html
 import os
-import sqlite3
 
 from store import DEFAULT_DB_PATH, TrailStore
 
@@ -23,27 +22,33 @@ def _clip(s, n=600):
 
 def render(db_path: str = DEFAULT_DB_PATH, out_path: str | None = None) -> str:
     store = TrailStore(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT name, step_hash FROM milestones ORDER BY rowid DESC"
+    refs = store.list_refs()
+    total = store.stats()["steps"]
+    role_rows = store.conn.execute(
+        "SELECT role, count(*) FROM steps GROUP BY role"
     ).fetchall()
-    total = conn.execute("SELECT count(*) FROM steps").fetchone()[0]
-    role_counts = dict(
-        conn.execute("SELECT role, count(*) FROM steps GROUP BY role").fetchall()
-    )
+    role_counts = dict(role_rows)
 
     body = []
-    body.append(
-        f"<p class='stat'>里程碑 <b>{len(rows)}</b> 个 · step <b>{total}</b> 条 · "
-        f"user {role_counts.get('user', 0)} / assistant {role_counts.get('assistant', 0)} / tool {role_counts.get('tool', 0)}</p>"
+    role_stat = (
+        f"user {role_counts.get('user', 0)} / "
+        f"assistant {role_counts.get('assistant', 0)} / "
+        f"tool {role_counts.get('tool', 0)}"
     )
-    for name, tip in rows:
+    body.append(
+        f"<p class='stat'>里程碑/分支 <b>{len(refs)}</b> 个 · "
+        f"step <b>{total}</b> 条 · {role_stat}</p>"
+    )
+    for ref in refs:
+        name = ref["name"]
+        tip = ref["tip"]
+        kind = ref["kind"]
         steps = store.checkout(name)
         body.append(
             f"<details><summary><b>{_esc(name)}</b>"
+            f"<span class='kind'>{_esc(kind)}</span>"
             f"<span class='hash'>{_esc(tip[:12])}</span>"
-            f"<span class='n'>{len(steps)} 步</span></summary>"
+            f"<span class='n'>{len(steps)} 步 · {_esc(ref.get('updated_at', ''))}</span></summary>"
         )
         for s in steps:
             role = s.get("role", "")
@@ -74,12 +79,14 @@ h1{{font-size:22px}}
 details{{border:1px solid #e5e7eb;border-radius:8px;margin:12px 0;padding:10px 14px}}
 summary{{cursor:pointer;font-size:15px}}
 .hash{{color:#9ca3af;font-family:monospace;font-size:12px;margin-left:8px}}
+.kind{{background:#eef2ff;color:#4338ca;border-radius:99px;font-size:11px;padding:2px 8px;margin-left:8px}}
 .n{{color:#9ca3af;font-size:12px;margin-left:8px}}
 .step{{margin:8px 0;padding:6px 10px;background:#f9fafb;border-radius:4px}}
 .role{{font-size:12px;font-weight:600;margin-bottom:2px}}
 .content{{font-size:14px;white-space:pre-wrap}}
 .toolname{{font-size:13px;font-weight:600;font-family:monospace}}
-pre{{font-size:12px;background:#fff;border:1px solid #eee;padding:6px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;word-break:break-all}}
+pre{{font-size:12px;background:#fff;border:1px solid #eee;padding:6px;border-radius:4px;
+overflow-x:auto;white-space:pre-wrap;word-break:break-all}}
 </style></head><body>
 <h1>agent-milestone · 轨迹查看</h1>
 {''.join(body)}
@@ -92,6 +99,10 @@ pre{{font-size:12px;background:#fff;border:1px solid #eee;padding:6px;border-rad
     return out_path
 
 
-if __name__ == "__main__":
+def main() -> None:
     p = render()
     print(f"已生成: {p}")
+
+
+if __name__ == "__main__":
+    main()
