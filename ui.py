@@ -67,6 +67,7 @@ select,input,textarea{background:#0b0d12;color:var(--text);border:1px solid var(
 .modal-box{width:min(640px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:0 24px 80px rgba(0,0,0,.4)}
 .modal-box h3{margin:0 0 12px}.modal-body{display:flex;flex-direction:column;gap:8px}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .modal-body label{color:var(--muted);font-size:12px}.modal-body textarea{min-height:220px}
+.modal-error{background:#3a1d22;border:1px solid var(--red);color:#ffb3b3;border-radius:8px;padding:8px 10px;margin-top:10px}
 .toast{position:fixed;right:20px;bottom:20px;background:#233b33;border:1px solid var(--green);color:var(--text);border-radius:10px;padding:10px 14px;z-index:60;max-width:520px}
 .toast.error{background:#3a1d22;border-color:var(--red)}
 .hidden{display:none}
@@ -147,6 +148,7 @@ select,input,textarea{background:#0b0d12;color:var(--text);border:1px solid var(
   <div class="modal-box">
     <h3 id="modalTitle"></h3>
     <div id="modalBody" class="modal-body"></div>
+    <div id="modalError" class="modal-error hidden"></div>
     <div class="modal-actions">
       <button onclick="closeModal()">取消</button>
       <button id="modalOk" class="primary" onclick="submitModal()">确认</button>
@@ -182,7 +184,7 @@ async function loadAll() {
 
 function renderLeaf(r, depth = 0) {
   const active = current === r.name ? ' active' : '';
-  return `<div class="tree-leaf${active}" style="margin-left:${depth * 12}px" onclick="selectRef(${JSON.stringify(r.name)})">${icon('tag')}<span class="tree-name">${esc(r.name)}</span><span class="tree-meta">${r.steps} steps · ${esc(r.tip.slice(0, 8))}</span></div>`;
+  return `<div class="tree-leaf${active}" style="margin-left:${depth * 12}px" data-name="${esc(r.name)}" onclick="selectRefFromEl(this)">${icon('tag')}<span class="tree-name">${esc(r.name)}</span><span class="tree-meta">${r.steps} steps · ${esc(r.tip.slice(0, 8))}</span></div>`;
 }
 
 function renderBranch(branch, branchByName, used) {
@@ -194,7 +196,11 @@ function renderBranch(branch, branchByName, used) {
     ...childBranches.map(b => renderBranch(b, branchByName, used)),
     ...childMilestones.map(r => renderLeaf(r, 1)),
   ].join('');
-  return `<details class="tree-folder" open><summary onclick="event.preventDefault(); selectRef(${JSON.stringify(branch.name)})">${icon('folder')}${icon('branch')}<span class="tree-name">${esc(branch.name)}</span><span class="tree-meta">${branch.steps} steps</span></summary>${children ? `<div class="tree-children">${children}</div>` : ''}</details>`;
+  return `<details class="tree-folder" open><summary data-name="${esc(branch.name)}" onclick="event.preventDefault(); selectRefFromEl(this)">${icon('folder')}${icon('branch')}<span class="tree-name">${esc(branch.name)}</span><span class="tree-meta">${branch.steps} steps</span></summary>${children ? `<div class="tree-children">${children}</div>` : ''}</details>`;
+}
+
+function selectRefFromEl(el) {
+  selectRef(el.dataset.name);
 }
 
 function renderRefsTree() {
@@ -295,6 +301,7 @@ const optionsHtml = () => refs.map(r => `<option value="${esc(r.name)}">${esc(r.
 function openModal(title, bodyHtml, onSubmit) {
   document.getElementById('modalTitle').textContent = title;
   document.getElementById('modalBody').innerHTML = bodyHtml;
+  document.getElementById('modalError').classList.add('hidden');
   document.getElementById('modal').classList.remove('hidden');
   modalSubmit = onSubmit;
 }
@@ -312,7 +319,9 @@ async function submitModal() {
     await modalSubmit();
     closeModal();
   } catch (e) {
-    toast(e.message || String(e), true);
+    const el = document.getElementById('modalError');
+    el.textContent = e.message || String(e);
+    el.classList.remove('hidden');
   } finally {
     ok.disabled = false;
   }
@@ -338,7 +347,7 @@ function newCheckpoint() {
     try { steps = JSON.parse(document.getElementById('cpSteps').value); }
     catch (e) { throw new Error('Steps JSON 解析失败: ' + e.message); }
     await api('/api/checkpoint', jsonOpt({name, steps, parent_ref: parent}));
-    await loadAll();
+    await selectRef(name);
     toast(`checkpoint 已创建: ${name}`);
   });
 }
@@ -352,7 +361,7 @@ function newBranch() {
     const from = document.getElementById('brFrom').value;
     if (!name || !from) throw new Error('请输入 branch 名称和起点');
     await api('/api/branch', jsonOpt({name, from_ref: from}));
-    await loadAll();
+    await selectRef(name);
     toast(`branch 已创建: ${name} ← ${from}`);
   });
 }
@@ -366,7 +375,7 @@ function renameRef() {
     if (!name || name === current) throw new Error('请输入不同的新名称');
     await api('/api/rename', jsonOpt({old_name: current, new_name: name}));
     current = name;
-    await loadAll();
+    await selectRef(name);
     toast(`已重命名为: ${name}`);
   });
 }
@@ -392,7 +401,7 @@ function rollbackRef() {
   `, async () => {
     const to = document.getElementById('rbTarget').value;
     const result = await api('/api/rollback', jsonOpt({name, to_ref: to}));
-    await loadAll();
+    await selectRef(name);
     toast(`已回滚 ${result.name}: ${result.from_tip.slice(0, 12)} → ${result.to_tip.slice(0, 12)}`);
   });
 }
@@ -402,7 +411,7 @@ function undoLast() {
   const name = current;
   openModal('撤回上一个操作', `<p>确认撤回 <b>${esc(name)}</b> 的上一个 checkpoint/rollback？</p>`, async () => {
     const result = await api('/api/undo', jsonOpt({name}));
-    await loadAll();
+    await selectRef(name);
     toast(`已撤回上一个 ${result.undid} 操作: ${result.from_tip.slice(0, 12)} → ${result.to_tip.slice(0, 12)}`);
   });
 }

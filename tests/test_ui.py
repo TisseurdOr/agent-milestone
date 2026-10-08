@@ -31,6 +31,7 @@ def test_ui_serves_index_and_manages_refs(tmp_path):
             assert 'id="diffBase"' in html
             assert "tree-folder" in html
             assert "icon('branch')" in html
+            assert 'id="modalError"' in html
 
         _json(base + "/api/checkpoint", "POST", {
             "name": "main",

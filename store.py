@@ -57,6 +57,28 @@ def step_hash(step: dict, parent: str | None = None) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def normalize_step(step: dict) -> dict:
+    """Coerce a step into the exact shape ``_row_to_step`` reconstructs.
+
+    Hashes must be computed on the normalized shape, otherwise non-string
+    content (dicts, numbers) would hash differently from its stored form and
+    content addressing would no longer round-trip.
+    """
+    role = str(step.get("role", ""))
+    out: dict[str, Any] = {"role": role}
+    content = step.get("content")
+    content = "" if content is None else str(content)
+    if content or role != "tool":
+        out["content"] = content
+    if step.get("tool_name"):
+        out["tool_name"] = str(step["tool_name"])
+    if step.get("tool_args") is not None:
+        out["tool_args"] = step["tool_args"]
+    if step.get("tool_result") is not None:
+        out["tool_result"] = step["tool_result"]
+    return out
+
+
 def _summarize_step(step: dict) -> dict:
     role = step.get("role", "")
     summary: dict[str, Any] = {"role": role}
@@ -182,6 +204,8 @@ class TrailStore:
         name = name.strip()
         clean_steps = [redact_step(step, enabled=self._redact) for step in steps]
         with self._lock:
+            if parent_ref:
+                self._resolve_ref(parent_ref)
             old_hash = None
             existing_kind = None
             existing_parent = None
@@ -198,47 +222,52 @@ class TrailStore:
             effective_parent = existing_parent if existing_parent is not None else parent_ref
             parent: str | None = None
             now = _utcnow()
-            for step in clean_steps:
-                h = step_hash(step, parent)
+            try:
+                for step in clean_steps:
+                    normalized = normalize_step(step)
+                    h = step_hash(normalized, parent)
+                    self.conn.execute(
+                        """INSERT OR IGNORE INTO steps
+                           (hash, role, content, tool_name, tool_args, tool_result, parent_hash, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            h,
+                            normalized["role"],
+                            normalized.get("content", ""),
+                            normalized.get("tool_name"),
+                            json.dumps(normalized.get("tool_args"), ensure_ascii=False, default=str)
+                            if normalized.get("tool_args") is not None else None,
+                            json.dumps(normalized.get("tool_result"), ensure_ascii=False, default=str)
+                            if normalized.get("tool_result") is not None else None,
+                            parent,
+                            now,
+                        ),
+                    )
+                    parent = h
                 self.conn.execute(
-                    """INSERT OR IGNORE INTO steps
-                       (hash, role, content, tool_name, tool_args, tool_result, parent_hash, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        h,
-                        step.get("role", ""),
-                        step.get("content", ""),
-                        step.get("tool_name"),
-                        json.dumps(step.get("tool_args"), ensure_ascii=False, default=str)
-                        if step.get("tool_args") is not None else None,
-                        json.dumps(step.get("tool_result"), ensure_ascii=False, default=str)
-                        if step.get("tool_result") is not None else None,
-                        parent,
-                        now,
-                    ),
-                )
-                parent = h
-            self.conn.execute(
-                """INSERT INTO refs(name, step_hash, kind, parent_ref, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(name) DO UPDATE SET step_hash=excluded.step_hash,
-                                                  kind=excluded.kind,
-                                                  parent_ref=excluded.parent_ref,
-                                                  updated_at=excluded.updated_at""",
-                (name, parent, kind, effective_parent, now, now),
-            )
-            if kind == "milestone":
-                self.conn.execute(
-                    """INSERT INTO milestones(name, step_hash, kind, created_at, updated_at)
-                       VALUES (?, ?, 'milestone', ?, ?)
+                    """INSERT INTO refs(name, step_hash, kind, parent_ref, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)
                        ON CONFLICT(name) DO UPDATE SET step_hash=excluded.step_hash,
-                                                      kind='milestone',
+                                                      kind=excluded.kind,
+                                                      parent_ref=excluded.parent_ref,
                                                       updated_at=excluded.updated_at""",
-                    (name, parent, now, now),
+                    (name, parent, kind, effective_parent, now, now),
                 )
-            self._log_ref(name, old_hash, parent, "checkpoint")
-            self.conn.commit()
-            return parent  # type: ignore[return-value]
+                if kind == "milestone":
+                    self.conn.execute(
+                        """INSERT INTO milestones(name, step_hash, kind, created_at, updated_at)
+                           VALUES (?, ?, 'milestone', ?, ?)
+                           ON CONFLICT(name) DO UPDATE SET step_hash=excluded.step_hash,
+                                                          kind='milestone',
+                                                          updated_at=excluded.updated_at""",
+                        (name, parent, now, now),
+                    )
+                self._log_ref(name, old_hash, parent, "checkpoint")
+                self.conn.commit()
+                return parent  # type: ignore[return-value]
+            except Exception:
+                self.conn.rollback()
+                raise
 
     def branch(self, name: str, from_ref: str) -> dict:
         """Create a branch ref at ``from_ref``."""
@@ -339,6 +368,9 @@ class TrailStore:
                 (new_name, tip, kind, parent_ref, created_at, now),
             )
             self._delete_ref_rows(old_name)
+            self.conn.execute(
+                "UPDATE refs SET parent_ref = ? WHERE parent_ref = ?", (new_name, old_name)
+            )
             self._log_ref(old_name, tip, None, "rename_from")
             self._log_ref(new_name, None, tip, "rename_to")
             self.conn.commit()
@@ -349,6 +381,9 @@ class TrailStore:
         with self._lock:
             tip = self._resolve_ref(name)
             self._delete_ref_rows(name)
+            self.conn.execute(
+                "UPDATE refs SET parent_ref = NULL WHERE parent_ref = ?", (name,)
+            )
             self._log_ref(name, tip, None, "delete")
             self.conn.commit()
             return {"name": name, "deleted_tip": tip}

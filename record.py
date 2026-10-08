@@ -48,7 +48,13 @@ def parse_transcript(path: str) -> list[dict]:
                 steps.append({"role": "user", "content": content})
             elif isinstance(content, list):
                 for b in content:
-                    if isinstance(b, dict) and b.get("type") == "tool_result":
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get("type") == "text":
+                        text = b.get("text", "")
+                        if text:
+                            steps.append({"role": "user", "content": text})
+                    elif b.get("type") == "tool_result":
                         tid = b.get("tool_use_id")
                         if tid in tool_steps:
                             tool_steps[tid]["tool_result"] = _text_of(b)

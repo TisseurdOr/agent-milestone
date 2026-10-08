@@ -41,3 +41,14 @@ def test_auto_name_skips_command_messages():
         {"role": "user", "content": "排查昨天的对账差异"},
     ]
     assert auto_name(steps) == "排查昨天的对账差异"
+
+
+def test_parse_transcript_reads_user_text_blocks(tmp_path):
+    transcript = tmp_path / "session.jsonl"
+    _write_jsonl(transcript, [
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "text", "text": "帮我看下这张表的分布"},
+        ]}},
+    ])
+    steps = parse_transcript(str(transcript))
+    assert steps == [{"role": "user", "content": "帮我看下这张表的分布"}]

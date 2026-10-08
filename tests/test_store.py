@@ -143,3 +143,37 @@ def test_migration_from_v1_milestones_table(tmp_path):
     assert store.stats()["schema_version"] == 3
     store.checkpoint("main", BASE)
     assert store.checkout("main") == BASE
+
+
+def test_checkpoint_accepts_non_string_content():
+    store = TrailStore(":memory:", redact=False)
+    store.checkpoint("main", [{"role": "user", "content": {"text": "结构化输入", "n": 1}}])
+    out = store.checkout("main")
+    assert out[0]["role"] == "user"
+    assert isinstance(out[0]["content"], str)
+    assert "结构化输入" in out[0]["content"]
+
+
+def test_checkpoint_rejects_missing_parent_ref():
+    store = TrailStore(":memory:", redact=False)
+    with pytest.raises(KeyError):
+        store.checkpoint("child", BASE, parent_ref="does-not-exist")
+    assert all(ref["name"] != "child" for ref in store.list_refs())
+
+
+def test_rename_reparents_children():
+    store = TrailStore(":memory:", redact=False)
+    store.checkpoint("main", BASE)
+    store.checkpoint("child", BASE, parent_ref="main")
+    store.rename("main", "main2")
+    child = next(r for r in store.list_refs() if r["name"] == "child")
+    assert child["parent_ref"] == "main2"
+
+
+def test_delete_clears_children_parent_ref():
+    store = TrailStore(":memory:", redact=False)
+    store.checkpoint("main", BASE)
+    store.checkpoint("child", BASE, parent_ref="main")
+    store.delete("main")
+    child = next(r for r in store.list_refs() if r["name"] == "child")
+    assert child["parent_ref"] is None
