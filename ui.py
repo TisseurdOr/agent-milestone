@@ -182,21 +182,22 @@ async function loadAll() {
   else if (current && !refs.some(r => r.name === current)) current = null;
 }
 
-function renderLeaf(r, depth = 0) {
-  const active = current === r.name ? ' active' : '';
-  return `<div class="tree-leaf${active}" style="margin-left:${depth * 12}px" data-name="${esc(r.name)}" onclick="selectRefFromEl(this)">${icon('tag')}<span class="tree-name">${esc(r.name)}</span><span class="tree-meta">${r.steps} steps · ${esc(r.tip.slice(0, 8))}</span></div>`;
+function refKindIcon(r) {
+  return r.kind === 'branch' ? icon('branch') : icon('tag');
 }
 
-function renderBranch(branch, branchByName, used) {
-  if (used.has(branch.name)) return '';
-  used.add(branch.name);
-  const childBranches = refs.filter(r => r.kind === 'branch' && r.parent_ref === branch.name);
-  const childMilestones = refs.filter(r => r.kind === 'milestone' && r.parent_ref === branch.name);
-  const children = [
-    ...childBranches.map(b => renderBranch(b, branchByName, used)),
-    ...childMilestones.map(r => renderLeaf(r, 1)),
-  ].join('');
-  return `<details class="tree-folder" open><summary data-name="${esc(branch.name)}" onclick="event.preventDefault(); selectRefFromEl(this)">${icon('folder')}${icon('branch')}<span class="tree-name">${esc(branch.name)}</span><span class="tree-meta">${branch.steps} steps</span></summary>${children ? `<div class="tree-children">${children}</div>` : ''}</details>`;
+// Tree nests every ref under the ref it was created from (branch OR milestone),
+// so a new branch always shows up inside its source folder, GitHub-style.
+function renderNode(r, used) {
+  if (used.has(r.name)) return '';
+  used.add(r.name);
+  const active = current === r.name ? ' active' : '';
+  const kids = refs.filter(c => c.parent_ref === r.name);
+  if (!kids.length) {
+    return `<div class="tree-leaf${active}" data-name="${esc(r.name)}" onclick="selectRefFromEl(this)">${refKindIcon(r)}<span class="tree-name">${esc(r.name)}</span><span class="tree-meta">${r.steps} steps · ${esc(r.tip.slice(0, 8))}</span></div>`;
+  }
+  const children = kids.map(c => renderNode(c, used)).join('');
+  return `<details class="tree-folder" open><summary data-name="${esc(r.name)}" onclick="event.preventDefault(); selectRefFromEl(this)">${icon('folder')}${refKindIcon(r)}<span class="tree-name">${esc(r.name)}</span><span class="tree-meta">${r.steps} steps</span></summary><div class="tree-children">${children}</div></details>`;
 }
 
 function selectRefFromEl(el) {
@@ -204,14 +205,13 @@ function selectRefFromEl(el) {
 }
 
 function renderRefsTree() {
-  const branchByName = new Map(refs.filter(r => r.kind === 'branch').map(r => [r.name, r]));
+  const byName = new Map(refs.map(r => [r.name, r]));
   const used = new Set();
-  const rootBranches = refs.filter(r => r.kind === 'branch' && (!r.parent_ref || !branchByName.has(r.parent_ref)));
-  const rootMilestones = refs.filter(r => r.kind === 'milestone' && (!r.parent_ref || !branchByName.has(r.parent_ref)));
-  const branchTree = rootBranches.map(b => renderBranch(b, branchByName, used)).join('');
-  const leftovers = refs.filter(r => r.kind === 'branch' && !used.has(r.name)).map(b => renderBranch(b, branchByName, used)).join('');
-  const milestones = rootMilestones.map(r => renderLeaf(r)).join('');
-  return `<div class="muted" style="margin:6px 0">Branches</div>${branchTree || leftovers || '<div class="muted">无</div>'}<div class="muted" style="margin:12px 0 6px">Milestones</div>${milestones || '<div class="muted">无</div>'}`;
+  const isRoot = r => !r.parent_ref || !byName.has(r.parent_ref);
+  const roots = refs.filter(isRoot).map(r => renderNode(r, used)).join('');
+  const orphans = refs.filter(r => !used.has(r.name)).map(r => renderNode(r, used)).join('');
+  const body = roots + orphans;
+  return `<div class="muted" style="margin:6px 0">Branches &amp; Milestones</div>${body || '<div class="muted">无</div>'}`;
 }
 
 function fillSelect(id, preferred) {
